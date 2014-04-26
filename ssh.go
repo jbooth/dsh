@@ -3,7 +3,7 @@ package dsh
 import (
 	"code.google.com/p/go.crypto/ssh"
 	"code.google.com/p/go.crypto/ssh/agent"
-	"ioutil"
+	"io/ioutil"
 	"os"
 )
 
