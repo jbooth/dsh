@@ -1,6 +1,7 @@
 package dsh
 
 import (
+	"bufio"
 	"code.google.com/p/go.crypto/ssh"
 	"os"
 	"strconv"
@@ -10,10 +11,24 @@ import (
 )
 
 type Split struct {
-	filePath string
-	host     string
-	startIdx int64
-	endIdx   int64
+	FilePath string
+	Host     string
+	StartIdx int64
+	EndIdx   int64
+}
+
+// returns commands which will work on a particular series of splits by using tail -c and head -c
+// commands set the environment variable $TASK_ID so that it will be unique per invocation
+func Commands(fileSplits []Split, cmd string) []HostCmd {
+	ret := make([]Command, len(fileSplits), len(fileSplits))
+	for idx, split := range fileSplits {
+		length := split.EndIdx - split.StartIdx
+		ret[idx] = HostCmd{
+			Host: split.Host,
+			Cmd: fmt.Sprintf("export TASK_ID=%d; tail -c +%d | head -c %d | %s",idx+1,split.StartIdx,length,cmd)
+		}
+	}
+	return ret
 }
 
 func GetSplits(filePaths []string) ([]Split, error) {
@@ -109,22 +124,57 @@ func nextLineBreak(f *os.File, fromPos int64) (int64, error) {
 }
 
 type HostCmd struct {
-	host string
-	cmd  string
+	Host string
+	Cmd  string
 }
 
 // execs multiple commands, each in their goroutine, and pipes all output
 // line-by-line to the provided stderr and stdout streams
-// guarantees that each line arrives whole, and returns after all commands have completed
-// returns error if any command finishes with bad result
-func ExecShells(commands []HostCmd, stdout io.Writer, stderr io.Writer) error {
+// guarantees that each line arrives whole, returns after all commands have completed
+func ExecShells(sshcfg *ssh.ClientConfig, commands []HostCmd, stdout io.Writer, stderr io.Writer) error {
 	var wg sync.WaitGroup
 	outBuff := make(chan string, 100)
 	errBuff := make(chan string, 100)
+	// fork the commands
 	for _, cmd := range commands {
 		wg.Add(1)
 		go func() {
-
+			// decrement waitgroup when done
+			defer wg.Done()
+			// connect ssh
+			cli, err := ssh.Dial("tcp4", cmd.Host, sshcfg)
+			if err != nil {
+				log.Printf("Error connecting to host %s : %s", cmd.Host, err)
+				return
+			}
+			sesh, err := cli.NewSession()
+			if err != nil {
+				log.Printf("Error obtaining session on host %s : %s", cmd.Host, err)
+				return
+			}
+			// pipe outputs
+			go func() {
+				seshOut, err := sesh.StdoutPipe()
+				if err != nil {
+					log.Printf("Error obtaining session stdout on host %s : %s", cmd.Host, err)
+					return
+				}
+				readLinesToChan(seshOut, nil, outBuff)
+			}()
+			go func() {
+				seshOut, err := sesh.StderrPipe()
+				if err != nil {
+					log.Printf("Error obtaining session stderr on host %s : %s", cmd.Host, err)
+					return
+				}
+				readLinesToChan(seshOut, fmt.Sprintf("%s: ", cmd.Host), errBuff)
+			}()
+			// issue command with proper env
+			toExec := fmt.Sprintf("if [ -f ~/.bashrc ]; then source ~/.bashrc ; fi; %s", cmd.Cmd)
+			err := sesh.Run(toExec)
+			if err != nil {
+				log.Printf("Error running command %s on host %s", toExec, cmd.Host)
+			}
 		}()
 	}
 	outDone := make(chan bool)
@@ -141,5 +191,17 @@ func ExecShells(commands []HostCmd, stdout io.Writer, stderr io.Writer) error {
 		}
 		errDone <- true
 	}()
+	wg.Wait()
 	return nil
+}
+
+func readLinesToChan(in io.Reader, linePrefix string, out chan string) {
+	scanner := bufio.NewScanner(in)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if linePrefix != nil {
+			line = linePrefix + line
+		}
+		out <- line
+	}
 }
