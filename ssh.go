@@ -3,7 +3,10 @@ package dsh
 import (
 	"code.google.com/p/go.crypto/ssh"
 	"code.google.com/p/go.crypto/ssh/agent"
+	"fmt"
 	"io/ioutil"
+	"log"
+	"net"
 	"os"
 )
 
@@ -12,43 +15,57 @@ import (
 // (~/.ssh/id_rsa, id_dsa)
 func SshConf(user string, keyFile string) *ssh.ClientConfig {
 
-	var auths []ssh.ClientAuth
+	var auths []ssh.AuthMethod
 	// ssh-agent auth goes first
 	if agentPipe, err := net.Dial("unix", os.Getenv("SSH_AUTH_SOCK")); err == nil {
-		auths = append(auths, agent.ClientAuthAgent(agent.NewAgentClient(agentPipe)))
+		ag := agent.NewClient(agentPipe)
+		agentSigners, err := ag.Signers()
+		if err != nil {
+			log.Printf("Error pulling signers from ssh-agent: %s", err)
+		} else {
+			if len(agentSigners) > 0 {
+				auths = append(auths, ssh.PublicKeys(agentSigners...))
+			}
+		}
 	}
 
 	// provided keyfile or default keyfiles
 	var keyFiles []string
-	if keyFile != nil && keyFile != "" {
+	if keyFile != "" {
 		keyFiles = []string{keyFile}
 	} else {
 		keyFiles = lookupKeyFiles()
 	}
-	signers := make(ssh.Signer, 0, 0)
+	signers := make([]ssh.Signer, 0, 0)
 	for _, keyFile := range keyFiles {
-		keyBytes, err := ioutil.ReadAll(keyFile)
+		keyFileH, err := os.Open(keyFile)
+		if err != nil {
+			log.Printf("Error opening keyFile %s : %s", keyFile, err)
+			continue
+		}
+		keyBytes, err := ioutil.ReadAll(keyFileH)
+		keyFileH.Close()
 		if err != nil {
 			log.Printf("Error reading keyFile %s, skipping : %s", keyFile, err)
 			continue
 		}
 		signer, err := ssh.ParsePrivateKey(keyBytes)
 		if err != nil {
-			log.Printf("Error parsing keyFile contents from %s, skipping: %s", keyFilem, err)
+			log.Printf("Error parsing keyFile contents from %s, skipping: %s", keyFile, err)
 		}
 		signers = append(signers, signer)
 	}
-	auths = append(auths, ssh.PublicKeys(signers))
-	return &ssh.ClientConfig {
-		user,
-		auths
+	auths = append(auths, ssh.PublicKeys(signers...))
+	return &ssh.ClientConfig{
+		User: user,
+		Auth: auths,
 	}
 }
 
 func lookupKeyFiles() []string {
 	ret := make([]string, 0, 0)
 	home := os.Getenv("HOME")
-	if home == nil {
+	if home == "" {
 		return ret
 	}
 	sshDir := fmt.Sprintf("%s/.ssh", home)
