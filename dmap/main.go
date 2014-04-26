@@ -1,11 +1,11 @@
 package main
 
 import (
-	"filepath"
 	"flag"
 	"fmt"
 	"github.com/jbooth/dsh"
 	"os"
+	"os/filepath"
 )
 
 var (
@@ -29,11 +29,24 @@ func main() {
 		if err != nil {
 			log.Printf("Error globbing path %s : %s", g, err)
 		}
+		files = append(files, matches...)
 	}
+	splits, err := dsh.GetSplits(files)
+	if err != nil {
+		log.Printf("Error calculation splits for files %+v : %s", files, err)
+		os.Exit(1)
+	}
+	cmd := args[len(args)-1]
+	splitCmds := dsh.Commands(splits, cmd)
+
 	sshConfig, err := dsh.SshConfig(USER, KEYFILE)
 	if err != nil {
 		log.Printf("Error getting ssh config: %s", err)
 		os.Exit(1)
 	}
-
+	err := dsh.ExecShells(sshConfig, splitCmds, os.Stdout, os.StdErr)
+	if err != nil {
+		log.Printf("Error execing commands %s", err)
+		os.Exit(1)
+	}
 }
