@@ -2,10 +2,10 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"github.com/jbooth/dsh"
+	"log"
 	"os"
-	"os/filepath"
+	"path/filepath"
 )
 
 var (
@@ -17,13 +17,17 @@ var (
 func main() {
 	flag.Parse()
 	args := flag.Args()
-	fmt.Printf("u: %s k %s args %+v", *USER, *KEYFILE, args)
-	if len(args < 2) {
+	if len(args) < 2 {
 		log.Printf("Expected at least 2 args, <path..> <cmd>")
 		os.Exit(1)
 	}
-	globs := args[:len(args)-2]
-	files := make([]string)
+	var globs []string
+	if len(args) == 2 {
+		globs = []string{args[0]}
+	} else {
+		globs = args[:len(args)-2]
+	}
+	files := make([]string, 0)
 	for _, g := range globs {
 		matches, err := filepath.Glob(g)
 		if err != nil {
@@ -38,13 +42,12 @@ func main() {
 	}
 	cmd := args[len(args)-1]
 	splitCmds := dsh.Commands(splits, cmd)
-
-	sshConfig, err := dsh.SshConfig(USER, KEYFILE)
+	sshConfig := dsh.SshConf(*USER, *KEYFILE)
 	if err != nil {
 		log.Printf("Error getting ssh config: %s", err)
 		os.Exit(1)
 	}
-	err := dsh.ExecShells(sshConfig, splitCmds, os.Stdout, os.StdErr)
+	err = dsh.ExecShells(sshConfig, splitCmds, os.Stdout, os.Stderr)
 	if err != nil {
 		log.Printf("Error execing commands %s", err)
 		os.Exit(1)

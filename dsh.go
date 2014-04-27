@@ -28,7 +28,7 @@ func Commands(fileSplits []Split, cmd string) []HostCmd {
 		length := split.EndIdx - split.StartIdx
 		ret[idx] = HostCmd{
 			Host: split.Host,
-			Cmd:  fmt.Sprintf("export TASK_ID=%d; tail -c +%d | head -c %d | %s", idx+1, split.StartIdx, length, cmd),
+			Cmd:  fmt.Sprintf("export TASK_ID=%d; tail -c +%d %s | head -c %d | %s", idx+1, split.StartIdx, split.FilePath, length, cmd),
 		}
 	}
 	return ret
@@ -38,10 +38,10 @@ func GetSplits(filePaths []string) ([]Split, error) {
 	ret := make([]Split, 0, 0)
 	for _, f := range filePaths {
 		splits, err := GetFileSplits(f)
-		if err != nil {
+		if err == nil {
 			ret = append(ret, splits...)
 		} else {
-			log.Printf("Err getting splits for file %s : %s", f, err)
+			log.Printf("Err getting splits for file %s : %s", f, err.Error())
 			return nil, err
 		}
 	}
@@ -74,6 +74,9 @@ func GetFileSplits(filePath string) ([]Split, error) {
 	ret := make([]Split, 0, len(lines))
 	// find first linebreak after each to make splits
 	for _, line := range lines {
+		if line == "" {
+			continue
+		}
 		lineSplits := strings.Split(line, "\t")
 		if len(lineSplits) < 3 {
 			return nil, fmt.Errorf("Error, improperly formatted blockLocs line (less than 3 elements): %s", line)
@@ -99,10 +102,10 @@ func GetFileSplits(filePath string) ([]Split, error) {
 			}
 		}
 		blockHosts := strings.Split(lineSplits[2], ",")
-		if len(blockHosts) == 0 {
-
+		if len(blockHosts) != 0 {
+			ret = append(ret, Split{filePath, blockHosts[0], blockStartPos, blockEndPos})
 		}
-		ret = append(ret, Split{filePath, blockHosts[0], blockStartPos, blockEndPos})
+
 	}
 	return ret, nil
 }
@@ -151,7 +154,7 @@ func ExecShells(sshcfg *ssh.ClientConfig, commands []HostCmd, stdout io.Writer, 
 			// decrement waitgroup when done
 			defer wg.Done()
 			// connect ssh
-			cli, err := ssh.Dial("tcp4", cmd.Host, sshcfg)
+			cli, err := ssh.Dial("tcp4", fmt.Sprintf("%s:%d", cmd.Host, 22), sshcfg)
 			if err != nil {
 				log.Printf("Error connecting to host %s : %s", cmd.Host, err)
 				return
@@ -179,7 +182,7 @@ func ExecShells(sshcfg *ssh.ClientConfig, commands []HostCmd, stdout io.Writer, 
 				readLinesToChan(seshOut, fmt.Sprintf("%s: ", cmd.Host), errBuff)
 			}()
 			// issue command with proper env
-			toExec := fmt.Sprintf("if [ -f ~/.bashrc ]; then source ~/.bashrc ; fi; %s", cmd.Cmd)
+			toExec := fmt.Sprintf("if [ -f ~/.bashrc ]; then source ~/.bashrc ; fi; %s; exit;", cmd.Cmd)
 			err = sesh.Run(toExec)
 			if err != nil {
 				log.Printf("Error running command %s on host %s", toExec, cmd.Host)
@@ -192,19 +195,25 @@ func ExecShells(sshcfg *ssh.ClientConfig, commands []HostCmd, stdout io.Writer, 
 		out := bufio.NewWriter(stdout)
 		for line := range outBuff {
 			out.WriteString(line)
+			out.WriteByte('\n')
 		}
 		out.Flush()
 		outDone <- true
+		close(outDone)
 	}()
 	go func() {
 		err := bufio.NewWriter(stderr)
 		for line := range errBuff {
 			err.WriteString(line)
+			err.WriteByte('\n')
 		}
 		err.Flush()
 		errDone <- true
+		close(errDone)
 	}()
 	wg.Wait()
+	<-outDone
+	<-errDone
 	return nil
 }
 
@@ -218,4 +227,5 @@ func readLinesToChan(in io.Reader, linePrefix string, out chan string) {
 		}
 		out <- line
 	}
+	close(out)
 }
