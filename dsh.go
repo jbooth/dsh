@@ -30,6 +30,7 @@ func Commands(fileSplits []Split, cmd string) []HostCmd {
 			Host: split.Host,
 			Cmd:  fmt.Sprintf("export TASK_ID=%d; tail -c +%d %s | head -c %d | %s", idx+1, split.StartIdx, split.FilePath, length, cmd),
 		}
+		fmt.Printf("Made cmd %+v from split %+v\n", ret[idx], split)
 	}
 	return ret
 }
@@ -150,7 +151,7 @@ func ExecShells(sshcfg *ssh.ClientConfig, commands []HostCmd, stdout io.Writer, 
 	// fork the commands
 	for _, cmd := range commands {
 		wg.Add(1)
-		go func() {
+		go func(cmd HostCmd) {
 			// decrement waitgroup when done
 			defer wg.Done()
 			// connect ssh
@@ -187,7 +188,8 @@ func ExecShells(sshcfg *ssh.ClientConfig, commands []HostCmd, stdout io.Writer, 
 			if err != nil {
 				log.Printf("Error running command %s on host %s", toExec, cmd.Host)
 			}
-		}()
+			sesh.Close()
+		}(cmd)
 	}
 	outDone := make(chan bool)
 	errDone := make(chan bool)
@@ -212,6 +214,8 @@ func ExecShells(sshcfg *ssh.ClientConfig, commands []HostCmd, stdout io.Writer, 
 		close(errDone)
 	}()
 	wg.Wait()
+	close(outBuff)
+	close(errBuff)
 	<-outDone
 	<-errDone
 	return nil
@@ -227,5 +231,4 @@ func readLinesToChan(in io.Reader, linePrefix string, out chan string) {
 		}
 		out <- line
 	}
-	close(out)
 }

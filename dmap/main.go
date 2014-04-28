@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"github.com/jbooth/dsh"
 	"log"
 	"os"
@@ -25,7 +26,7 @@ func main() {
 	if len(args) == 2 {
 		globs = []string{args[0]}
 	} else {
-		globs = args[:len(args)-2]
+		globs = args[:len(args)-1]
 	}
 	files := make([]string, 0)
 	for _, g := range globs {
@@ -33,6 +34,7 @@ func main() {
 		if err != nil {
 			log.Printf("Error globbing path %s : %s", g, err)
 		}
+		fmt.Printf("Got matches %+v for glob %s\n", matches, g)
 		files = append(files, matches...)
 	}
 	splits, err := dsh.GetSplits(files)
@@ -40,6 +42,7 @@ func main() {
 		log.Printf("Error calculation splits for files %+v : %s", files, err)
 		os.Exit(1)
 	}
+	fmt.Printf("Splits: %+v\n", splits)
 	cmd := args[len(args)-1]
 	splitCmds := dsh.Commands(splits, cmd)
 	sshConfig := dsh.SshConf(*USER, *KEYFILE)
