@@ -30,7 +30,7 @@ func main() {
 	// one day we'll do this sort in-process.  maybe.
 	for i := 0; i < numOutputs; i++ {
 		log.Printf("Forking sort command\n")
-		processes[i] = exec.Command("sort", "-t\t", "-k1,1", "-")
+		processes[i] = exec.Command("sort", "-")
 		in, err := processes[i].StdinPipe()
 		if err != nil {
 			panic(err)
@@ -41,6 +41,10 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
+		procErr, err := processes[i].StderrPipe()
+		go func() {
+			io.Copy(os.Stderr, procErr)
+		}()
 		err = processes[i].Start()
 		if err != nil {
 			panic(err)
@@ -70,11 +74,13 @@ func main() {
 				break
 			}
 		}
+		var key []byte
 		if tabIdx < 0 {
-			log.Printf("Line %s has no tab to split on!", string(line))
-			continue
+			// use whole line
+			key = line
+		} else {
+			key = line[:tabIdx]
 		}
-		key := line[:tabIdx]
 		hash := uint32(7)
 		for _, b := range key {
 			hash = hash*31 + uint32(b)
