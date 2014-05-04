@@ -3,7 +3,7 @@ Tools for distributed operation on files from the  [maggiefs](http://github.com/
 We split files and dispatch work to the node the files are located at using ssh, either by ssh-agent or by key files in $HOME/.ssh.
 
 
-Dmap
+dmap
 ----
 
     dmap inputFile [inputFile ...] command
@@ -19,7 +19,7 @@ Splits a file on the line breaks closest to block boundaries and dispatches one 
   
   
 
-Dmr
+dmr
 ---
 
     dmr [-numReduce N] inFile:mapCmd [inFile:mapCmd ...] reduceCmd outputDir
@@ -28,7 +28,7 @@ Executes a mapreduce job.  For each inFile glob, we break the file into line-sep
 
 For example, if we wanted to count occurences of words in a file, the 1-liner
 
-    dmr /tmp/mfs/mfs2.*:"sed 's/\s\+/\n/g'" "uniq -c" /tmp/mfs/output
+    dmr /tmp/mfs/mfs2.*:"sed 's/\s\+/\n/g'" "uniq -c" /tmp/mfs/outputDir
     
 would, during the map phase, split all whitespace into line breaks, putting each word on it's own line.  Our output is sorted before arriving at our reduce phase, where we count the occurences of each word.  
 
